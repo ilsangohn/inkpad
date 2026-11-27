@@ -1,5 +1,5 @@
 // Network first, so a reload picks up new versions; the cache keeps the app usable offline.
-const CACHE = 'lecture-notes-v1';
+const CACHE = 'lecture-notes-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/ink.js', 'js/exporter.js',

@@ -19,7 +19,7 @@ const A4 = [595.28, 841.89];
 const MAX_CANVAS_PX = 8e6; // iOS Safari limits canvas area and total canvas memory
 const MIN_Z = 0.3;
 const MAX_Z = 6;
-const PALM_WINDOW_MS = 1200;
+const PALM_WINDOW_MS = 600;
 
 const $ = (s) => document.querySelector(s);
 const el = {
@@ -586,7 +586,8 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-  if (e.pointerType === 'pen') S.lastPen = performance.now();
+  // Hover (Pencil near the screen without touching) does not count as writing.
+  if (e.pointerType === 'pen' && e.buttons) S.lastPen = performance.now();
   const a = S.active;
   if (!a || e.pointerId !== a.id) return;
   e.preventDefault();
@@ -641,7 +642,8 @@ el.editor.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Pencil input draws through pointer events and must never scroll the page; Safari marks
 // it as touchType 'stylus'. Finger touches scroll natively, except a palm resting while
-// writing: a touch that starts shortly after Pencil activity, or a broad contact, is ignored.
+// writing: a touch that starts while the Pencil is down or right after a stroke is ignored.
+// (Contact radius is not used: iOS reports fingertips above 30px, which blocked scrolling.)
 const palmIds = new Set();
 const isStylus = (t) => t.touchType === 'stylus';
 const fingersOf = (list) => [...list].filter((t) => !isStylus(t) && !palmIds.has(t.identifier));
@@ -654,7 +656,7 @@ function onTouchStart(e) {
       e.preventDefault();
       continue;
     }
-    if (!S.finger && (now - S.lastPen < PALM_WINDOW_MS || (t.radiusX || 0) > 30)) palmIds.add(t.identifier);
+    if (!S.finger && (S.active?.type === 'pen' || now - S.lastPen < PALM_WINDOW_MS)) palmIds.add(t.identifier);
   }
   const fingers = fingersOf(e.touches);
   if (fingers.length >= 2) {
