@@ -23,8 +23,8 @@ node serve.js 8790
 
 브라우저에서 http://localhost:8790 을 엽니다. `test/sample.pdf`는 회전 페이지가 들어 있는 시험용 PDF입니다.
 
-외부 라이브러리는 `vendor/`에 들어 있습니다(pdf.js 4.10.38 legacy build, pdf-lib 1.17.1). 업데이트할 때는 `npm install` 후 `node_modules`에서 다시 복사합니다.
+외부 라이브러리는 `vendor/`에 들어 있습니다(pdf.js 4.10.38 legacy build, pdf-lib 1.17.1). 업데이트할 때는 `npm install` 후 `node_modules`에서 다시 복사하고, 오프라인용 글꼴 목록 `vendor/fonts.json`(cmaps와 standard_fonts 파일 목록)도 다시 만듭니다.
 
 ## iPad에 설치
 
-https://ilsangohn.github.io/inkpad/ 를 iPad Safari에서 열고, 공유 버튼 → "홈 화면에 추가"를 누릅니다. 오프라인 사용과 공유 시트는 HTTPS에서만 동작합니다.
+https://ilsangohn.github.io/inkpad/ 를 iPad Safari에서 열고, 공유 버튼 → "홈 화면에 추가"를 누릅니다. 오프라인 사용과 공유 시트는 HTTPS에서만 동작합니다. 인터넷이 연결된 상태로 한 번 열어 두면 그다음부터는 오프라인에서도 열립니다. 인터넷이 안 되는 와이파이에서는 1.5초 기다린 뒤 저장된 앱으로 뜹니다.

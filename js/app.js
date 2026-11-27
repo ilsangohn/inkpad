@@ -11,7 +11,7 @@ const PDF_OPTS = {
 };
 
 // Version shown in the app: bump the minor number for fixes, the major for features.
-const APP_VERSION = '6.1';
+const APP_VERSION = '6.2';
 const PEN_COLORS = [
   '#1d1d1f', '#2557d6', '#1e9bd7', '#0f9d8f', '#d62828', '#e64980', '#f08c00', '#7b3fe4', '#8b5a2b',
 ];
