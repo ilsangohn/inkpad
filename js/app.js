@@ -10,7 +10,7 @@ const PDF_OPTS = {
   isEvalSupported: false,
 };
 
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 const PEN_COLORS = [
   '#1d1d1f', '#2557d6', '#1e9bd7', '#0f9d8f', '#d62828', '#e64980', '#f08c00', '#7b3fe4', '#8b5a2b',
 ];
@@ -414,8 +414,10 @@ function anchorAt(fx, fy) {
 
 // Sets the zoom and scrolls so the anchored page point sits at viewport point (fx, fy).
 function applyZoom(z, anchor, fx, fy) {
-  dropSelection();
-  removePasteBubble();
+  if (Math.abs(clamp(z, MIN_Z, MAX_Z) - S.zoom) > 1e-6) {
+    dropSelection();
+    removePasteBubble();
+  }
   S.zoom = clamp(z, MIN_Z, MAX_Z);
   layout();
   const sr = el.scroller.getBoundingClientRect();
@@ -546,7 +548,8 @@ function canDraw(e) {
   if (S.gesture) return false;
   if (e.pointerType === 'pen') return true;
   if (e.pointerType === 'mouse') return e.button === 0;
-  return e.pointerType === 'touch' && S.finger;
+  // A touch right after Pencil use is a resting palm, even in finger mode.
+  return e.pointerType === 'touch' && S.finger && performance.now() - S.lastPen > PALM_WINDOW_MS;
 }
 
 // Positions the live layer so page coordinates of v map onto the screen.
@@ -636,7 +639,8 @@ function onPointerDown(e) {
   if (S.active || e.target.closest('.sel-bar, .paste-bubble')) return;
   removePasteBubble();
   // A selection can be dragged with the Pencil or a finger.
-  if (S.sel && e.target.closest('.sel') && !S.gesture) {
+  if (S.sel && e.target.closest('.sel') && !S.gesture
+    && (e.pointerType !== 'touch' || performance.now() - S.lastPen > PALM_WINDOW_MS)) {
     startMove(e);
     return;
   }
@@ -649,7 +653,6 @@ function onPointerDown(e) {
   const a = { id: e.pointerId, type: e.pointerType, v: pageEl._view, tool: S.tool, pr: null };
   S.active = a;
   if (a.tool === 'lasso') {
-    dropSelection();
     a.path = [];
     lassoAdd(a, [e]);
     return;
@@ -769,24 +772,31 @@ function finishLasso(a) {
   const xs = a.path.map((p) => p[0]);
   const ys = a.path.map((p) => p[1]);
   const lb = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  // A tap rather than a loop: offer to paste there.
-  if ((lb[2] - lb[0]) * S.zoom < 8 && (lb[3] - lb[1]) * S.zoom < 8) {
+  // A tap rather than a loop: clears the selection, or offers to paste there.
+  if ((lb[2] - lb[0]) * S.zoom < 10 && (lb[3] - lb[1]) * S.zoom < 10) {
+    dropSelection();
     if (S.clipboard) showPasteBubble(a.v, a.path[0][0], a.path[0][1]);
     return;
   }
-  // A stroke is selected when at least half of its samples lie inside the loop.
+  // A stroke is selected when its center or a third of its samples lie inside the loop.
   const picked = a.v.page.strokes.filter((s) => {
     const b = s.bb || (s.bb = bbox(s));
     if (b[2] < lb[0] || b[0] > lb[2] || b[3] < lb[1] || b[1] > lb[3]) return false;
+    if (insidePolygon(a.path, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)) return true;
     let n = 0;
     let inside = 0;
     for (let i = 0; i < s.p.length; i += 3) {
       n++;
       if (insidePolygon(a.path, s.p[i], s.p[i + 1])) inside++;
     }
-    return inside * 2 >= n;
+    return inside * 3 >= n;
   });
-  if (picked.length) select(a.v, picked);
+  if (picked.length) {
+    select(a.v, picked);
+  } else {
+    dropSelection();
+    toast('올가미 안에 필기가 없습니다');
+  }
 }
 
 function selectionBox(strokes) {
@@ -1420,6 +1430,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 for (const n of document.querySelectorAll('.app-version')) n.textContent = `inkpad 버전 ${APP_VERSION}`;
 navigator.storage?.persist?.();
+
+// Show unexpected errors on screen: there is no console on the iPad.
+window.addEventListener('error', (e) => toast(`오류: ${e.message}`, 6000));
+window.addEventListener('unhandledrejection', (e) => toast(`오류: ${e.reason?.message || e.reason}`, 6000));
 
 refreshToolbar();
 showLibrary();
