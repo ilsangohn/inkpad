@@ -209,6 +209,17 @@ dialog p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 
 .sel-bar button { color: #fff; padding: 10px 14px; font-size: 14px; font-weight: 600; }
 .sel-bar button + button { border-left: 1px solid rgba(255, 255, 255, 0.18); }
 .sel-bar button:active, .paste-bubble:active { background: #3a3a3e; }
+.sel-handle {
+  position: absolute; right: -16px; bottom: -16px; width: 32px; height: 32px; touch-action: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.sel-handle::after {
+  content: ''; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.sel.scaling .sel-bar { display: none; }
+.flash { position: absolute; z-index: 3; pointer-events: none; background: rgba(37, 87, 214, 0.18); border: 2px solid var(--accent); animation: flash 0.45s ease-out forwards; }
+@keyframes flash { to { opacity: 0; } }
 .paste-bubble { padding: 10px 14px; font-size: 14px; font-weight: 600; transform: translate(-50%, calc(-100% - 10px)); }
 
 /* ---------- scroll bar ---------- */
@@ -227,7 +238,7 @@ dialog p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 
 .lib-foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 40px; }
 
 /* Narrow screens (portrait iPad): document controls on top, drawing tools on a second row. */
-@media (max-width: 1060px) {
+@media (max-width: 1100px) {
   .toolbar { flex-wrap: wrap; height: auto; padding-bottom: 2px; }
   .tb-left { order: 1; height: var(--tb-h); }
   .tb-right { order: 2; height: var(--tb-h); }

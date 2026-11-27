@@ -10,7 +10,7 @@ const PDF_OPTS = {
   isEvalSupported: false,
 };
 
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 const PEN_COLORS = [
   '#1d1d1f', '#2557d6', '#1e9bd7', '#0f9d8f', '#d62828', '#e64980', '#f08c00', '#7b3fe4', '#8b5a2b',
 ];
@@ -308,7 +308,7 @@ function computeScale(v) {
 
 function renderView(v) {
   computeScale(v);
-  if (v.page.strokes.length || v.inkReady) paintInk(v);
+  if (v.page.strokes.length || v.page.images?.length || v.inkReady) paintInk(v);
   if (v.page.kind === 'pdf') renderPdf(v);
 }
 
@@ -326,6 +326,7 @@ function paintInk(v) {
   ctx.clearRect(0, 0, W, H);
   ctx.setTransform(v.scale, 0, 0, v.scale, 0, 0);
   const lifted = S.sel && S.sel.v === v ? S.sel.set : null;
+  if (v.page.images?.length) drawImages(ctx, v.page.images, lifted);
   for (const s of v.page.strokes) if (!lifted?.has(s)) drawStroke(ctx, s);
   v.inkReady = true;
 }
@@ -641,7 +642,7 @@ function onPointerDown(e) {
   // A selection can be dragged with the Pencil or a finger.
   if (S.sel && e.target.closest('.sel') && !S.gesture
     && (e.pointerType !== 'touch' || performance.now() - S.lastPen > PALM_WINDOW_MS)) {
-    startMove(e);
+    startMove(e, !!e.target.closest('.sel-handle'));
     return;
   }
   if (!canDraw(e)) return;
@@ -652,7 +653,7 @@ function onPointerDown(e) {
   capture(e.pointerId);
   const a = { id: e.pointerId, type: e.pointerType, v: pageEl._view, tool: S.tool, pr: null };
   S.active = a;
-  if (a.tool === 'lasso') {
+  if (a.tool === 'lasso' || a.tool === 'clip') {
     a.path = [];
     lassoAdd(a, [e]);
     return;
@@ -673,13 +674,13 @@ function onPointerMove(e) {
   const a = S.active;
   if (!a || e.pointerId !== a.id) return;
   e.preventDefault();
-  if (a.tool === 'move') {
+  if (a.tool === 'move' || a.tool === 'scale') {
     moveSelection(a, e);
     return;
   }
   const evs = coalesced(e);
   if (a.tool === 'eraser') for (const ev of evs) eraseAt(a, ev);
-  else if (a.tool === 'lasso') lassoAdd(a, evs);
+  else if (a.tool === 'lasso' || a.tool === 'clip') lassoAdd(a, evs);
   else addPoints(a, evs);
 }
 
@@ -689,12 +690,16 @@ function finishStroke() {
   S.active = null;
   clearLive();
   el.live.classList.remove('hl');
-  if (a.tool === 'move') {
+  if (a.tool === 'move' || a.tool === 'scale') {
     finishMove(a);
     return;
   }
   if (a.tool === 'lasso') {
     finishLasso(a);
+    return;
+  }
+  if (a.tool === 'clip') {
+    finishCapture(a);
     return;
   }
   if (a.tool === 'eraser') {
@@ -713,7 +718,7 @@ function finishStroke() {
 function abortStroke() {
   const a = S.active;
   if (!a) return;
-  if (a.tool === 'eraser' || a.tool === 'move') {
+  if (a.tool === 'eraser' || a.tool === 'move' || a.tool === 'scale') {
     finishStroke();
     return;
   }
@@ -733,11 +738,41 @@ el.pages.addEventListener('pointerup', onPointerEnd);
 el.pages.addEventListener('pointercancel', onPointerEnd);
 el.editor.addEventListener('contextmenu', (e) => e.preventDefault());
 
-/* ================= lasso selection, copy and paste ================= */
+/* ================= selection, capture, copy and paste ================= */
 
-// A selection lifts its strokes off the page's ink layer into a box of its own, so dragging
-// moves one small element; the strokes stay in page.strokes throughout (saving and export
-// see them unchanged) and are translated only when a drag ends.
+// Page content is ink strokes (page.strokes) and pasted image clippings (page.images:
+// { id, x, y, w, h, data: PNG ArrayBuffer }), all in page units. A selection lifts its items
+// off the ink layer into a box of its own, so dragging moves one small element; the items
+// stay in the page arrays throughout (saving and export see them unchanged) and are
+// transformed only when a drag ends.
+
+const imagesOf = (page) => page.images || (page.images = []);
+
+// Decoded images, by id; decoding is asynchronous, so pages repaint when one is ready.
+const bitmaps = new Map();
+function bitmapFor(img) {
+  let entry = bitmaps.get(img.id);
+  if (!entry) {
+    entry = { bmp: null };
+    bitmaps.set(img.id, entry);
+    createImageBitmap(new Blob([img.data], { type: 'image/png' }))
+      .then((bmp) => {
+        entry.bmp = bmp;
+        for (const v of S.views) if (v.visible && v.page.images?.includes(img)) paintInk(v);
+        if (S.sel?.images.includes(img)) select(S.sel.v, S.sel.strokes, S.sel.images);
+      })
+      .catch((e) => console.error(e));
+  }
+  return entry.bmp;
+}
+
+function drawImages(ctx, images, skip) {
+  for (const img of images) {
+    if (skip?.has(img)) continue;
+    const bmp = bitmapFor(img);
+    if (bmp) ctx.drawImage(bmp, img.x, img.y, img.w, img.h);
+  }
+}
 
 function pagePoint(v, ev) {
   const pr = v.el.getBoundingClientRect();
@@ -751,9 +786,17 @@ function lassoAdd(a, events) {
   liveCtx.lineWidth = 1.5 / S.zoom;
   liveCtx.setLineDash([6 / S.zoom, 4 / S.zoom]);
   liveCtx.strokeStyle = '#2557d6';
+  liveCtx.fillStyle = 'rgba(37, 87, 214, 0.08)';
   liveCtx.beginPath();
-  a.path.forEach(([x, y], i) => (i ? liveCtx.lineTo(x, y) : liveCtx.moveTo(x, y)));
-  if (a.path.length > 2) liveCtx.closePath();
+  if (a.tool === 'clip') {
+    const [x0, y0] = a.path[0];
+    const [x1, y1] = a.path[a.path.length - 1];
+    liveCtx.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+  } else {
+    a.path.forEach(([x, y], i) => (i ? liveCtx.lineTo(x, y) : liveCtx.moveTo(x, y)));
+    if (a.path.length > 2) liveCtx.closePath();
+  }
+  liveCtx.fill();
   liveCtx.stroke();
   liveCtx.setLineDash([]);
 }
@@ -768,18 +811,30 @@ function insidePolygon(poly, x, y) {
   return inside;
 }
 
+function pathBox(path) {
+  const xs = path.map((p) => p[0]);
+  const ys = path.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+// A tap with the lasso or capture tool clears the selection, or offers to paste there.
+function isTap(lb) {
+  return (lb[2] - lb[0]) * S.zoom < 10 && (lb[3] - lb[1]) * S.zoom < 10;
+}
+
+function tapAt(a) {
+  dropSelection();
+  if (S.clipboard) showPasteBubble(a.v, a.path[0][0], a.path[0][1]);
+}
+
 function finishLasso(a) {
-  const xs = a.path.map((p) => p[0]);
-  const ys = a.path.map((p) => p[1]);
-  const lb = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  // A tap rather than a loop: clears the selection, or offers to paste there.
-  if ((lb[2] - lb[0]) * S.zoom < 10 && (lb[3] - lb[1]) * S.zoom < 10) {
-    dropSelection();
-    if (S.clipboard) showPasteBubble(a.v, a.path[0][0], a.path[0][1]);
+  const lb = pathBox(a.path);
+  if (isTap(lb)) {
+    tapAt(a);
     return;
   }
   // A stroke is selected when its center or a third of its samples lie inside the loop.
-  const picked = a.v.page.strokes.filter((s) => {
+  const strokes = a.v.page.strokes.filter((s) => {
     const b = s.bb || (s.bb = bbox(s));
     if (b[2] < lb[0] || b[0] > lb[2] || b[3] < lb[1] || b[1] > lb[3]) return false;
     if (insidePolygon(a.path, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)) return true;
@@ -791,30 +846,94 @@ function finishLasso(a) {
     }
     return inside * 3 >= n;
   });
-  if (picked.length) {
-    select(a.v, picked);
+  const images = imagesOf(a.v.page).filter((m) => insidePolygon(a.path, m.x + m.w / 2, m.y + m.h / 2));
+  if (strokes.length || images.length) {
+    select(a.v, strokes, images);
   } else {
     dropSelection();
-    toast('올가미 안에 필기가 없습니다');
+    toast('올가미 안에 필기가 없습니다. 인쇄된 내용은 캡처 도구로 복사하세요.', 3000);
   }
 }
 
-function selectionBox(strokes) {
+// Renders a rectangle of the page (PDF, images and ink) to a PNG and puts it on the clipboard.
+async function finishCapture(a) {
+  const lb = pathBox([a.path[0], a.path[a.path.length - 1]]);
+  if (isTap(lb)) {
+    tapAt(a);
+    return;
+  }
+  const v = a.v;
+  const x0 = clamp(lb[0], 0, v.page.w);
+  const y0 = clamp(lb[1], 0, v.page.h);
+  const w = clamp(lb[2], 0, v.page.w) - x0;
+  const h = clamp(lb[3], 0, v.page.h) - y0;
+  if (w < 2 || h < 2) return;
+  const k = Math.min(4, Math.sqrt(4e6 / (w * h))); // about 290 dpi, at most 4 megapixels
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  try {
+    if (v.page.kind === 'pdf') {
+      const page = await S.pdf.getPage(v.page.src + 1);
+      const vp = page.getViewport({ scale: k, offsetX: -x0 * k, offsetY: -y0 * k });
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    }
+    ctx.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
+    drawImages(ctx, imagesOf(v.page));
+    for (const s of v.page.strokes) drawStroke(ctx, s);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const data = await blob.arrayBuffer();
+    const id = uid();
+    bitmaps.set(id, { bmp: await createImageBitmap(c) });
+    S.clipboard = { strokes: [], images: [{ id, x: -w / 2, y: -h / 2, w, h, data }] };
+    c.width = c.height = 0;
+    flashRect(v, x0, y0, w, h);
+    toast('캡처했습니다. 붙일 곳을 한 번 누르세요.', 2600);
+  } catch (e) {
+    console.error(e);
+    toast('캡처하지 못했습니다', 2500);
+  }
+}
+
+function flashRect(v, x, y, w, h) {
+  const f = document.createElement('div');
+  f.className = 'flash';
+  f.style.left = `${x * S.zoom}px`;
+  f.style.top = `${y * S.zoom}px`;
+  f.style.width = `${w * S.zoom}px`;
+  f.style.height = `${h * S.zoom}px`;
+  v.el.append(f);
+  setTimeout(() => f.remove(), 450);
+}
+
+function itemsBox(strokes, images) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const s of strokes) {
     const b = s.bb || (s.bb = bbox(s));
-    const r = (s.t === 'hl' ? s.w : s.w * 1.4) / 2 + 6;
+    const r = (s.t === 'hl' ? s.w : s.w * 1.4) / 2;
     x0 = Math.min(x0, b[0] - r);
     y0 = Math.min(y0, b[1] - r);
     x1 = Math.max(x1, b[2] + r);
     y1 = Math.max(y1, b[3] + r);
   }
+  for (const m of images) {
+    x0 = Math.min(x0, m.x);
+    y0 = Math.min(y0, m.y);
+    x1 = Math.max(x1, m.x + m.w);
+    y1 = Math.max(y1, m.y + m.h);
+  }
   return [x0, y0, x1, y1];
 }
 
-function select(v, strokes) {
+function select(v, strokes, images = []) {
   dropSelection();
-  const sel = { v, strokes, set: new Set(strokes), box: selectionBox(strokes) };
+  const sel = { v, strokes, images, set: new Set([...strokes, ...images]) };
+  const b = itemsBox(strokes, images);
+  const pad = 6;
+  sel.box = [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad];
   S.sel = sel;
   paintInk(v);
   if (!v.scale) computeScale(v);
@@ -831,6 +950,7 @@ function select(v, strokes) {
   c.height = Math.max(1, Math.round((y1 - y0) * v.scale));
   const ctx = c.getContext('2d');
   ctx.setTransform(v.scale, 0, 0, v.scale, -x0 * v.scale, -y0 * v.scale);
+  drawImages(ctx, images);
   for (const s of strokes) drawStroke(ctx, s);
   const bar = document.createElement('div');
   bar.className = 'sel-bar' + (y0 * z < 60 ? ' below' : '');
@@ -841,12 +961,14 @@ function select(v, strokes) {
     else if (act === 'cut') cutSelection();
     else if (act === 'delete') deleteSelection();
   };
-  box.append(c, bar);
+  const handle = document.createElement('div');
+  handle.className = 'sel-handle';
+  box.append(c, bar, handle);
   v.el.append(box);
   sel.el = box;
 }
 
-// Puts the lifted strokes back on the ink layer.
+// Puts the lifted items back on the ink layer.
 function dropSelection() {
   const sel = S.sel;
   if (!sel) return;
@@ -855,71 +977,108 @@ function dropSelection() {
   if (sel.v.visible) paintInk(sel.v);
 }
 
-function startMove(e) {
+function startMove(e, scaling) {
   e.preventDefault();
   capture(e.pointerId);
+  const r = S.sel.el.getBoundingClientRect();
   S.active = {
-    id: e.pointerId, type: e.pointerType, tool: 'move', v: S.sel.v,
-    x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+    id: e.pointerId, type: e.pointerType, tool: scaling ? 'scale' : 'move', v: S.sel.v,
+    x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height, k: 1,
   };
+  if (scaling) S.sel.el.classList.add('scaling');
 }
 
 function moveSelection(a, e) {
   a.x = e.clientX;
   a.y = e.clientY;
-  S.sel.el.style.transform = `translate(${a.x - a.x0}px, ${a.y - a.y0}px)`;
+  if (a.tool === 'move') {
+    S.sel.el.style.transform = `translate(${a.x - a.x0}px, ${a.y - a.y0}px)`;
+    return;
+  }
+  // Uniform scale about the box's top-left corner, following the handle along the diagonal.
+  const px = a.x - a.left;
+  const py = a.y - a.top;
+  a.k = clamp((px * a.w + py * a.h) / (a.w * a.w + a.h * a.h), 0.1, 10);
+  S.sel.el.style.transformOrigin = '0 0';
+  S.sel.el.style.transform = `scale(${a.k})`;
 }
 
-function translateStrokes(strokes, dx, dy) {
+function transformItems(strokes, images, f) {
   for (const s of strokes) {
     for (let i = 0; i < s.p.length; i += 3) {
-      s.p[i] += dx;
-      s.p[i + 1] += dy;
+      const [x, y] = f.point(s.p[i], s.p[i + 1]);
+      s.p[i] = x;
+      s.p[i + 1] = y;
     }
+    s.w *= f.k;
     s.bb = bbox(s);
   }
+  for (const m of images) {
+    [m.x, m.y] = f.point(m.x, m.y);
+    m.w *= f.k;
+    m.h *= f.k;
+  }
 }
+
+const shiftBy = (dx, dy) => ({ k: 1, point: (x, y) => [x + dx, y + dy] });
+const scaleAbout = (k, ox, oy) => ({ k, point: (x, y) => [ox + (x - ox) * k, oy + (y - oy) * k] });
 
 function finishMove(a) {
   const sel = S.sel;
   if (!sel) return;
-  const dx = (a.x - a.x0) / S.zoom;
-  const dy = (a.y - a.y0) / S.zoom;
   sel.el.style.transform = '';
-  if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
-  translateStrokes(sel.strokes, dx, dy);
-  pushOp({ type: 'move', page: sel.v.page, strokes: sel.strokes, dx, dy });
-  select(sel.v, sel.strokes);
+  sel.el.classList.remove('scaling');
+  if (a.tool === 'move') {
+    const dx = (a.x - a.x0) / S.zoom;
+    const dy = (a.y - a.y0) / S.zoom;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+    transformItems(sel.strokes, sel.images, shiftBy(dx, dy));
+    pushOp({ type: 'move', page: sel.v.page, strokes: sel.strokes, images: sel.images, dx, dy });
+  } else {
+    if (Math.abs(a.k - 1) < 0.005) return;
+    const [ox, oy] = sel.box;
+    transformItems(sel.strokes, sel.images, scaleAbout(a.k, ox, oy));
+    pushOp({ type: 'scale', page: sel.v.page, strokes: sel.strokes, images: sel.images, k: a.k, ox, oy });
+  }
+  select(sel.v, sel.strokes, sel.images);
 }
 
+// The clipboard holds copies positioned relative to the selection's center.
 function copySelection() {
   const sel = S.sel;
   if (!sel) return;
   const [x0, y0, x1, y1] = sel.box;
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
-  // Stored relative to the selection's center.
-  S.clipboard = sel.strokes.map((s) => {
-    const p = Float32Array.from(s.p);
-    for (let i = 0; i < p.length; i += 3) {
-      p[i] -= cx;
-      p[i + 1] -= cy;
-    }
-    return { t: s.t, c: s.c, w: s.w, p };
-  });
+  S.clipboard = {
+    strokes: sel.strokes.map((s) => {
+      const p = Float32Array.from(s.p);
+      for (let i = 0; i < p.length; i += 3) {
+        p[i] -= cx;
+        p[i + 1] -= cy;
+      }
+      return { t: s.t, c: s.c, w: s.w, p };
+    }),
+    images: sel.images.map((m) => ({ id: m.id, x: m.x - cx, y: m.y - cy, w: m.w, h: m.h, data: m.data })),
+  };
   toast('복사했습니다. 붙일 곳을 올가미로 한 번 누르세요.', 2600);
 }
 
 function removeSelected() {
   const sel = S.sel;
-  const strokes = sel.v.page.strokes;
-  const idx = sel.strokes.map((s) => strokes.indexOf(s)).filter((i) => i >= 0).sort((x, y) => y - x);
-  const items = idx.map((i) => ({ stroke: strokes[i], idx: i }));
-  for (const i of idx) strokes.splice(i, 1);
+  const page = sel.v.page;
+  const take = (arr, items) => {
+    const idx = items.map((x) => arr.indexOf(x)).filter((i) => i >= 0).sort((p, q) => q - p);
+    const out = idx.map((i) => ({ item: arr[i], idx: i }));
+    for (const i of idx) arr.splice(i, 1);
+    return out;
+  };
+  const strokes = take(page.strokes, sel.strokes);
+  const images = take(imagesOf(page), sel.images);
   S.sel = null;
   sel.el.remove();
   paintInk(sel.v);
-  pushOp({ type: 'erase', page: sel.v.page, items });
+  pushOp({ type: 'removeItems', page, strokes, images });
 }
 
 function cutSelection() {
@@ -934,9 +1093,10 @@ function deleteSelection() {
 }
 
 function pasteAt(v, cx, cy) {
-  if (!S.clipboard) return;
+  const clip = S.clipboard;
+  if (!clip) return;
   dropSelection();
-  const strokes = S.clipboard.map((s) => {
+  const strokes = clip.strokes.map((s) => {
     const p = Float32Array.from(s.p);
     for (let i = 0; i < p.length; i += 3) {
       p[i] += cx;
@@ -946,15 +1106,23 @@ function pasteAt(v, cx, cy) {
     t.bb = bbox(t);
     return t;
   });
+  // Each pasted image is its own object; the decoded bitmap is shared through the cache.
+  const images = clip.images.map((m) => {
+    const id = uid();
+    const cached = bitmaps.get(m.id);
+    if (cached) bitmaps.set(id, cached);
+    return { id, x: m.x + cx, y: m.y + cy, w: m.w, h: m.h, data: m.data };
+  });
   v.page.strokes.push(...strokes);
-  pushOp({ type: 'addMany', page: v.page, strokes });
-  select(v, strokes);
+  imagesOf(v.page).push(...images);
+  pushOp({ type: 'addMany', page: v.page, strokes, images });
+  select(v, strokes, images);
 }
 
 // Pastes at the middle of the visible part of the current page.
 function pasteVisible() {
   if (!S.clipboard) {
-    toast('복사한 필기가 없습니다');
+    toast('복사한 내용이 없습니다');
     return;
   }
   const v = S.views[S.current];
@@ -1101,9 +1269,13 @@ function showPage(page) {
   else scrollToPage(S.views.indexOf(v));
 }
 
+function removeFrom(arr, x) {
+  const i = arr.indexOf(x);
+  if (i >= 0) arr.splice(i, 1);
+}
+
 function removeStroke(page, s) {
-  const i = page.strokes.indexOf(s);
-  if (i >= 0) page.strokes.splice(i, 1);
+  removeFrom(page.strokes, s);
 }
 
 function applyOp(op) {
@@ -1119,10 +1291,20 @@ function applyOp(op) {
       break;
     case 'addMany':
       op.page.strokes.push(...op.strokes);
+      imagesOf(op.page).push(...(op.images || []));
+      showPage(op.page);
+      break;
+    case 'removeItems':
+      for (const it of op.strokes) removeFrom(op.page.strokes, it.item);
+      for (const it of op.images) removeFrom(imagesOf(op.page), it.item);
       showPage(op.page);
       break;
     case 'move':
-      translateStrokes(op.strokes, op.dx, op.dy);
+      transformItems(op.strokes, op.images || [], shiftBy(op.dx, op.dy));
+      showPage(op.page);
+      break;
+    case 'scale':
+      transformItems(op.strokes, op.images, scaleAbout(op.k, op.ox, op.oy));
       showPage(op.page);
       break;
     case 'addPage':
@@ -1150,11 +1332,21 @@ function revertOp(op) {
       showPage(op.page);
       break;
     case 'addMany':
-      for (const s of op.strokes) removeStroke(op.page, s);
+      for (const s of op.strokes) removeFrom(op.page.strokes, s);
+      for (const m of op.images || []) removeFrom(imagesOf(op.page), m);
+      showPage(op.page);
+      break;
+    case 'removeItems':
+      for (let i = op.strokes.length - 1; i >= 0; i--) op.page.strokes.splice(op.strokes[i].idx, 0, op.strokes[i].item);
+      for (let i = op.images.length - 1; i >= 0; i--) imagesOf(op.page).splice(op.images[i].idx, 0, op.images[i].item);
       showPage(op.page);
       break;
     case 'move':
-      translateStrokes(op.strokes, -op.dx, -op.dy);
+      transformItems(op.strokes, op.images || [], shiftBy(-op.dx, -op.dy));
+      showPage(op.page);
+      break;
+    case 'scale':
+      transformItems(op.strokes, op.images, scaleAbout(1 / op.k, op.ox, op.oy));
       showPage(op.page);
       break;
     case 'addPage':
@@ -1258,7 +1450,7 @@ function refreshToolbar() {
   }));
   el.swatches.hidden = !colors.length;
   el.swatches.previousElementSibling.hidden = !colors.length;
-  const sized = S.tool !== 'lasso';
+  const sized = S.tool !== 'lasso' && S.tool !== 'clip';
   el.sizes.hidden = !sized;
   el.sizes.previousElementSibling.hidden = !sized;
   el.sizes.replaceChildren(...(sized ? SIZE_DOTS : []).map((d, i) => {
@@ -1276,7 +1468,7 @@ function refreshToolbar() {
 }
 
 function setTool(tool) {
-  if (tool !== 'lasso') dropSelection();
+  if (tool !== 'lasso' && tool !== 'clip') dropSelection();
   removePasteBubble();
   S.tool = tool;
   savePrefs();
@@ -1310,8 +1502,8 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     dropSelection();
     removePasteBubble();
-  } else if (!mod && ['p', 'h', 'e', 'l'].includes(e.key)) {
-    setTool({ p: 'pen', h: 'hl', e: 'eraser', l: 'lasso' }[e.key]);
+  } else if (!mod && ['p', 'h', 'e', 'l', 'c'].includes(e.key)) {
+    setTool({ p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', c: 'clip' }[e.key]);
   }
 });
 

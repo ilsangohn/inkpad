@@ -4,6 +4,7 @@ import {
   PDFDocument, LineCapStyle, LineJoinStyle,
   pushGraphicsState, popGraphicsState, setGraphicsState, setLineWidth, setLineCap, setLineJoin,
   setStrokingRgbColor, setFillingRgbColor, moveTo, lineTo, appendBezierCurve, stroke, fill, closePath,
+  concatTransformationMatrix, drawObject,
 } from '../vendor/pdf-lib.esm.min.js';
 import { HL_ALPHA, count, piece, widthAt } from './ink.js';
 
@@ -99,10 +100,27 @@ export async function exportDocument(doc, srcBytes, pdfjsDoc) {
       page = out.addPage([p.w, p.h]);
       map = (x, y) => [x, p.h - y];
     }
-    if (!p.strokes.length) continue;
+    const images = p.images || [];
+    if (!p.strokes.length && !images.length) continue;
     if (p.kind === 'pdf') isolateOriginal(page, out);
+    const ops = [];
+    // Pasted clippings go under the ink. The matrix maps the image's unit square onto its
+    // rectangle, which also handles rotated pages.
+    for (const m of images) {
+      const img = await out.embedPng(new Uint8Array(m.data));
+      const name = page.node.newXObject('Img', img.ref);
+      const o = map(m.x, m.y + m.h);
+      const r = map(m.x + m.w, m.y + m.h);
+      const t = map(m.x, m.y);
+      ops.push(
+        pushGraphicsState(),
+        concatTransformationMatrix(r[0] - o[0], r[1] - o[1], t[0] - o[0], t[1] - o[1], o[0], o[1]),
+        drawObject(name),
+        popGraphicsState(),
+      );
+    }
     const hlState = page.node.newExtGState('GSHL', hlRef);
-    const ops = [pushGraphicsState(), setLineCap(LineCapStyle.Round), setLineJoin(LineJoinStyle.Round)];
+    ops.push(pushGraphicsState(), setLineCap(LineCapStyle.Round), setLineJoin(LineJoinStyle.Round));
     for (const s of p.strokes) strokeOps(ops, s, map, hlState);
     ops.push(popGraphicsState());
     // Chunked: a single spread of a long operator list can exceed the engine's argument limit.
