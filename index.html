@@ -21,6 +21,7 @@
       <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/></symbol>
       <symbol id="i-hl" viewBox="0 0 24 24"><path d="M4 21h7"/><path d="M7 17l2-5 8-8 3 3-8 8z"/><path d="M7 17l2 2"/></symbol>
       <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M9 20h11"/><path d="M5.3 15.3l9-9a2 2 0 0 1 2.8 0l2.6 2.6a2 2 0 0 1 0 2.8L11 20H9l-3.7-3.7a.7.7 0 0 1 0-1z"/><path d="M9.5 11l5 5"/></symbol>
+      <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c4.4 0 8 2.2 8 5s-3.6 5-8 5-8-2.2-8-5 3.6-5 8-5z" stroke-dasharray="2.6 2.4"/><path d="M7.5 13.2c-1.2 1.4-1.3 3.4.6 4.4 1.5.8 1.9 2.1 1 3.2"/></symbol>
       <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 13L4 8l5-5"/><path d="M4 8h10a6 6 0 0 1 0 12h-3"/></symbol>
       <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 13l5-5-5-5"/><path d="M20 8H10a6 6 0 0 0 0 12h3"/></symbol>
       <symbol id="i-addpage" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M12 10v7M8.5 13.5h7"/></symbol>
@@ -55,6 +56,7 @@
         <button class="icon tool" data-tool="pen" aria-label="펜"><svg><use href="#i-pen"/></svg></button>
         <button class="icon tool" data-tool="hl" aria-label="형광펜"><svg><use href="#i-hl"/></svg></button>
         <button class="icon tool" data-tool="eraser" aria-label="지우개"><svg><use href="#i-eraser"/></svg></button>
+        <button class="icon tool" data-tool="lasso" aria-label="올가미 선택"><svg><use href="#i-lasso"/></svg></button>
         <span class="sep"></span>
         <div id="swatches" class="swatches"></div>
         <span class="sep"></span>
@@ -84,14 +86,14 @@
     </div>
     <button data-act="finger" class="toggle">손가락으로 필기 <span class="state"></span></button>
     <hr>
+    <button data-act="paste">복사한 필기 붙여넣기</button>
+    <hr>
     <button data-act="add-page">현재 페이지 뒤에 빈 페이지</button>
     <button data-act="delete-page" class="danger">현재 페이지 삭제</button>
     <hr>
     <button data-act="rename">이름 바꾸기</button>
     <div class="app-version menu-foot"></div>
   </div>
-
-  <div id="palette" class="menu palette" hidden></div>
 
   <dialog id="export-dialog">
     <form method="dialog">

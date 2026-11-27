@@ -192,14 +192,24 @@ dialog p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 
   .icon { width: 38px; }
 }
 
-/* ---------- color palette ---------- */
+/* ---------- selection ---------- */
 
-.palette { display: grid; grid-template-columns: repeat(6, 40px); gap: 4px; min-width: 0; padding: 10px; }
-.menu.palette .swatch { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 10px; }
-.palette .swatch i { width: 26px; height: 26px; flex: none; }
-.palette-btn i {
-  background: conic-gradient(#d62828, #f08c00, #ffd60a, #1b8a4c, #1e9bd7, #2557d6, #7b3fe4, #e64980, #d62828);
+.sel {
+  position: absolute; z-index: 2; touch-action: none;
+  border: 1.5px dashed var(--accent); border-radius: 4px; background: rgba(37, 87, 214, 0.05);
 }
+.page .sel canvas { pointer-events: none; }
+.sel-bar, .paste-bubble {
+  position: absolute; z-index: 4; display: flex; white-space: nowrap;
+  background: #1d1d1f; color: #fff; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.sel-bar { left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); }
+.sel-bar.below { bottom: auto; top: calc(100% + 8px); }
+.sel-bar button { color: #fff; padding: 10px 14px; font-size: 14px; font-weight: 600; }
+.sel-bar button + button { border-left: 1px solid rgba(255, 255, 255, 0.18); }
+.sel-bar button:active, .paste-bubble:active { background: #3a3a3e; }
+.paste-bubble { padding: 10px 14px; font-size: 14px; font-weight: 600; transform: translate(-50%, calc(-100% - 10px)); }
 
 /* ---------- scroll bar ---------- */
 
@@ -215,3 +225,12 @@ dialog p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 
 
 .menu-foot { font-size: 12px; color: var(--muted); padding: 8px 12px 4px; }
 .lib-foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 40px; }
+
+/* Narrow screens (portrait iPad): document controls on top, drawing tools on a second row. */
+@media (max-width: 1060px) {
+  .toolbar { flex-wrap: wrap; height: auto; padding-bottom: 2px; }
+  .tb-left { order: 1; height: var(--tb-h); }
+  .tb-right { order: 2; height: var(--tb-h); }
+  .tb-tools { order: 3; flex: 1 0 100%; justify-content: center; border-top: 1px solid var(--line); padding: 3px 0; }
+  #toast { top: calc(2 * var(--tb-h) + env(safe-area-inset-top) + 14px); }
+}

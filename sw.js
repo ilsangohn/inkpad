@@ -1,5 +1,5 @@
 // Network first, so a reload picks up new versions; the cache keeps the app usable offline.
-const CACHE = 'inkpad-v3';
+const CACHE = 'inkpad-v4';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/ink.js', 'js/exporter.js',
