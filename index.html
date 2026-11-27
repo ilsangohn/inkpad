@@ -41,6 +41,7 @@
     </header>
     <div id="doc-list" class="doc-list"></div>
     <p id="lib-empty" class="lib-empty" hidden>PDF를 열거나 빈 노트를 만들어 시작하세요.<br>필기는 이 iPad 안에 자동으로 저장됩니다.</p>
+    <p class="app-version lib-foot"></p>
   </section>
 
   <section id="editor" class="view" hidden>
@@ -70,6 +71,7 @@
     <div class="stage" id="stage">
       <div id="scroller"><div id="pages"></div></div>
       <canvas id="live"></canvas>
+      <div id="scrub" hidden><div id="scrub-thumb"></div></div>
       <div id="page-indicator"></div>
     </div>
   </section>
@@ -86,7 +88,10 @@
     <button data-act="delete-page" class="danger">현재 페이지 삭제</button>
     <hr>
     <button data-act="rename">이름 바꾸기</button>
+    <div class="app-version menu-foot"></div>
   </div>
+
+  <div id="palette" class="menu palette" hidden></div>
 
   <dialog id="export-dialog">
     <form method="dialog">

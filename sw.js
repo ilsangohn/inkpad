@@ -1,5 +1,5 @@
 // Network first, so a reload picks up new versions; the cache keeps the app usable offline.
-const CACHE = 'lecture-notes-v2';
+const CACHE = 'inkpad-v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/ink.js', 'js/exporter.js',
@@ -22,8 +22,10 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  // GitHub Pages sends max-age=600; revalidate so a new version shows up on the next launch.
+  const fresh = req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache' }) : new Request(req, { cache: 'no-cache' });
   e.respondWith(
-    fetch(req)
+    fetch(fresh)
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

@@ -10,8 +10,13 @@ const PDF_OPTS = {
   isEvalSupported: false,
 };
 
-const PEN_COLORS = ['#1d1d1f', '#2557d6', '#d62828', '#1b8a4c'];
-const HL_COLORS = ['#ffd60a', '#7ae582', '#ff8fab', '#7cc6ff'];
+const APP_VERSION = 3;
+const PEN_COLORS = [
+  '#1d1d1f', '#7a7a80', '#ffffff', '#2557d6', '#1e9bd7', '#0f9d8f',
+  '#1b8a4c', '#d62828', '#e64980', '#f08c00', '#7b3fe4', '#8b5a2b',
+];
+const HL_COLORS = ['#ffd60a', '#7ae582', '#ff8fab', '#7cc6ff', '#ffb347', '#c9a7ff'];
+const QUICK_DEFAULT = { pen: ['#1d1d1f', '#2557d6', '#d62828', '#1b8a4c'], hl: HL_COLORS.slice(0, 4) };
 // Pen and highlighter widths are in page units (pt); eraser radii are in screen px.
 const SIZES = { pen: [1.1, 2, 3.4], hl: [9, 15, 24], eraser: [8, 16, 32] };
 const SIZE_DOTS = [5, 9, 14];
@@ -28,7 +33,8 @@ const el = {
   live: $('#live'), indicator: $('#page-indicator'), title: $('#doc-title'), saveState: $('#save-state'),
   swatches: $('#swatches'), sizes: $('#sizes'), undo: $('#btn-undo'), redo: $('#btn-redo'),
   menu: $('#menu'), more: $('#btn-more'), exportDialog: $('#export-dialog'), exportInfo: $('#export-info'),
-  share: $('#btn-share'), toast: $('#toast'),
+  share: $('#btn-share'), toast: $('#toast'), palette: $('#palette'),
+  scrub: $('#scrub'), thumb: $('#scrub-thumb'),
 };
 const liveCtx = el.live.getContext('2d');
 
@@ -38,6 +44,7 @@ const S = {
   zoom: 1, fit: true,
   tool: prefs.tool || 'pen',
   color: { pen: prefs.penColor || PEN_COLORS[0], hl: prefs.hlColor || HL_COLORS[0] },
+  quick: { pen: prefs.penQuick || QUICK_DEFAULT.pen, hl: prefs.hlQuick || QUICK_DEFAULT.hl },
   size: { pen: prefs.penSize ?? 1, hl: prefs.hlSize ?? 1, eraser: prefs.eraserSize ?? 1 },
   finger: !!prefs.finger,
   undo: [], redo: [],
@@ -48,7 +55,7 @@ const S = {
 
 function savePrefs() {
   localStorage.setItem('prefs', JSON.stringify({
-    tool: S.tool, penColor: S.color.pen, hlColor: S.color.hl,
+    tool: S.tool, penColor: S.color.pen, hlColor: S.color.hl, penQuick: S.quick.pen, hlQuick: S.quick.hl,
     penSize: S.size.pen, hlSize: S.size.hl, eraserSize: S.size.eraser, finger: S.finger,
   }));
 }
@@ -274,6 +281,7 @@ function layout() {
     v.el.style.width = `${v.page.w * S.zoom}px`;
     v.el.style.height = `${v.page.h * S.zoom}px`;
   }
+  updateScrub();
 }
 
 function onIntersect(entries) {
@@ -426,8 +434,52 @@ function zoomStep(f) {
 
 let scrollRaf = 0;
 el.scroller.addEventListener('scroll', () => {
-  if (!scrollRaf) scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; trackCurrent(); });
+  if (!scrollRaf) scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; trackCurrent(); updateScrub(); });
 }, { passive: true });
+
+// Always-visible scroll bar on the right edge (iOS hides native scroll bars); drag it or tap the track.
+function updateScrub() {
+  const sc = el.scroller;
+  const max = sc.scrollHeight - sc.clientHeight;
+  el.scrub.hidden = !S.doc || max <= 1;
+  if (el.scrub.hidden) return;
+  const track = el.scrub.clientHeight;
+  const h = Math.max(48, (track * sc.clientHeight) / sc.scrollHeight);
+  el.thumb.style.height = `${h}px`;
+  el.thumb.style.transform = `translateY(${((track - h) * sc.scrollTop) / max}px)`;
+}
+
+let scrubDrag = null;
+el.scrub.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const sc = el.scroller;
+  const track = el.scrub.clientHeight;
+  const h = el.thumb.offsetHeight;
+  const max = sc.scrollHeight - sc.clientHeight;
+  const tr = el.thumb.getBoundingClientRect();
+  if (e.clientY < tr.top || e.clientY > tr.bottom) {
+    const top = el.scrub.getBoundingClientRect().top;
+    sc.scrollTop = clamp((e.clientY - top - h / 2) / (track - h), 0, 1) * max;
+  }
+  scrubDrag = { id: e.pointerId, y0: e.clientY, s0: sc.scrollTop, k: max / Math.max(1, track - h) };
+  try {
+    el.scrub.setPointerCapture(e.pointerId);
+  } catch {
+    // dragging still works while the finger stays on the bar
+  }
+  el.scrub.classList.add('active');
+});
+el.scrub.addEventListener('pointermove', (e) => {
+  if (!scrubDrag || e.pointerId !== scrubDrag.id) return;
+  el.scroller.scrollTop = scrubDrag.s0 + (e.clientY - scrubDrag.y0) * scrubDrag.k;
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  el.scrub.addEventListener(type, (e) => {
+    if (!scrubDrag || e.pointerId !== scrubDrag.id) return;
+    scrubDrag = null;
+    el.scrub.classList.remove('active');
+  });
+}
 
 function trackCurrent() {
   const probe = el.scroller.scrollTop + el.scroller.clientHeight * 0.4;
@@ -670,11 +722,9 @@ function onTouchStart(e) {
 
 function onTouchMove(e) {
   if (S.gesture) {
-    if (!e.cancelable) {
-      cancelGesture();
-      return;
-    }
-    e.preventDefault();
+    // If one finger already started a native scroll the event is not cancelable; keep
+    // tracking anyway: endGesture re-anchors from live positions, so the result is still right.
+    if (e.cancelable) e.preventDefault();
     moveGesture(e);
     return;
   }
@@ -879,19 +929,21 @@ el.title.onclick = renameCurrent;
 
 function refreshToolbar() {
   for (const b of document.querySelectorAll('.tool')) b.classList.toggle('active', b.dataset.tool === S.tool);
-  const colors = S.tool === 'pen' ? PEN_COLORS : S.tool === 'hl' ? HL_COLORS : [];
-  el.swatches.replaceChildren(...colors.map((c) => {
-    const b = document.createElement('button');
-    b.className = 'swatch' + (S.color[S.tool] === c ? ' active' : '');
-    b.setAttribute('aria-label', `색 ${c}`);
-    b.innerHTML = `<i style="background:${c}"></i>`;
-    b.onclick = () => {
-      S.color[S.tool] = c;
-      savePrefs();
-      refreshToolbar();
+  const colors = S.quick[S.tool] || [];
+  const swatches = colors.map((c) => swatchButton(c, () => setColor(c)));
+  if (colors.length) {
+    const more = document.createElement('button');
+    more.className = 'swatch palette-btn';
+    more.setAttribute('aria-label', '색 더 보기');
+    more.innerHTML = '<i></i>';
+    more.onclick = (e) => {
+      e.stopPropagation();
+      if (el.palette.hidden) openPalette(more);
+      else closePalette();
     };
-    return b;
-  }));
+    swatches.push(more);
+  }
+  el.swatches.replaceChildren(...swatches);
   el.swatches.hidden = !colors.length;
   el.swatches.previousElementSibling.hidden = !colors.length;
   el.sizes.replaceChildren(...SIZE_DOTS.map((d, i) => {
@@ -908,8 +960,45 @@ function refreshToolbar() {
   }));
 }
 
+function swatchButton(c, onPick) {
+  const b = document.createElement('button');
+  b.className = 'swatch' + (S.color[S.tool] === c ? ' active' : '');
+  b.setAttribute('aria-label', `색 ${c}`);
+  b.innerHTML = `<i style="background:${c}"></i>`;
+  b.onclick = onPick;
+  return b;
+}
+
+function setColor(c) {
+  S.color[S.tool] = c;
+  savePrefs();
+  refreshToolbar();
+}
+
+// A color picked from the palette joins the toolbar shortcuts, replacing the oldest one.
+function pickFromPalette(c) {
+  const quick = S.quick[S.tool];
+  if (!quick.includes(c)) S.quick[S.tool] = [c, ...quick].slice(0, 4);
+  closePalette();
+  setColor(c);
+}
+
+function openPalette(anchor) {
+  const colors = S.tool === 'pen' ? PEN_COLORS : HL_COLORS;
+  el.palette.replaceChildren(...colors.map((c) => swatchButton(c, () => pickFromPalette(c))));
+  el.palette.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  el.palette.style.top = `${r.bottom + 6}px`;
+  el.palette.style.left = `${clamp(r.left + r.width / 2 - el.palette.offsetWidth / 2, 8, innerWidth - el.palette.offsetWidth - 8)}px`;
+}
+
+function closePalette() {
+  el.palette.hidden = true;
+}
+
 for (const b of document.querySelectorAll('.tool')) {
   b.onclick = () => {
+    closePalette();
     S.tool = b.dataset.tool;
     savePrefs();
     refreshToolbar();
@@ -957,6 +1046,7 @@ el.more.onclick = (e) => {
 
 document.addEventListener('pointerdown', (e) => {
   if (!el.menu.hidden && !el.menu.contains(e.target) && !el.more.contains(e.target)) closeMenu();
+  if (!el.palette.hidden && !el.palette.contains(e.target) && !e.target.closest('.palette-btn')) closePalette();
 });
 
 el.menu.addEventListener('click', (e) => {
@@ -1035,8 +1125,17 @@ el.exportDialog.querySelector('[value=download]').onclick = (e) => {
 /* ================= start ================= */
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  // When an updated service worker takes over, reload once so the new code runs right away.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    flushSave().then(() => location.reload());
+  });
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
 }
+for (const n of document.querySelectorAll('.app-version')) n.textContent = `inkpad 버전 ${APP_VERSION}`;
 navigator.storage?.persist?.();
 
 refreshToolbar();

@@ -191,3 +191,27 @@ dialog p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 
   .sep { margin: 0 3px; }
   .icon { width: 38px; }
 }
+
+/* ---------- color palette ---------- */
+
+.palette { display: grid; grid-template-columns: repeat(6, 40px); gap: 4px; min-width: 0; padding: 10px; }
+.menu.palette .swatch { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 10px; }
+.palette .swatch i { width: 26px; height: 26px; flex: none; }
+.palette-btn i {
+  background: conic-gradient(#d62828, #f08c00, #ffd60a, #1b8a4c, #1e9bd7, #2557d6, #7b3fe4, #e64980, #d62828);
+}
+
+/* ---------- scroll bar ---------- */
+
+#scrub {
+  position: absolute; top: 10px; bottom: 10px; right: max(2px, env(safe-area-inset-right));
+  width: 30px; z-index: 3; touch-action: none;
+}
+#scrub-thumb {
+  position: absolute; top: 0; right: 6px; width: 7px; border-radius: 4px;
+  background: rgba(29, 29, 31, 0.32); transition: width 0.12s, background 0.12s;
+}
+#scrub.active #scrub-thumb { width: 11px; background: rgba(37, 87, 214, 0.75); }
+
+.menu-foot { font-size: 12px; color: var(--muted); padding: 8px 12px 4px; }
+.lib-foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 40px; }
