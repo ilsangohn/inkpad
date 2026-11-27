@@ -10,7 +10,8 @@ const PDF_OPTS = {
   isEvalSupported: false,
 };
 
-const APP_VERSION = 6;
+// Version shown in the app: bump the minor number for fixes, the major for features.
+const APP_VERSION = '6.1';
 const PEN_COLORS = [
   '#1d1d1f', '#2557d6', '#1e9bd7', '#0f9d8f', '#d62828', '#e64980', '#f08c00', '#7b3fe4', '#8b5a2b',
 ];
@@ -774,6 +775,21 @@ function drawImages(ctx, images, skip) {
   }
 }
 
+// Buttons placed on a page react to pointer events, not click: Pencil touches there are
+// canceled (so the Pencil never scrolls), and Safari then sends no click for them.
+function onTap(node, fn) {
+  let down = null;
+  node.addEventListener('pointerdown', (e) => {
+    down = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  node.addEventListener('pointerup', (e) => {
+    if (!down || e.pointerId !== down.id) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    down = null;
+    if (moved < 12) fn(e);
+  });
+}
+
 function pagePoint(v, ev) {
   const pr = v.el.getBoundingClientRect();
   return [(ev.clientX - pr.left) / S.zoom, (ev.clientY - pr.top) / S.zoom];
@@ -955,12 +971,12 @@ function select(v, strokes, images = []) {
   const bar = document.createElement('div');
   bar.className = 'sel-bar' + (y0 * z < 60 ? ' below' : '');
   bar.innerHTML = '<button data-a="copy">복사</button><button data-a="cut">잘라내기</button><button data-a="delete">삭제</button>';
-  bar.onclick = (e) => {
+  onTap(bar, (e) => {
     const act = e.target.closest('[data-a]')?.dataset.a;
     if (act === 'copy') copySelection();
     else if (act === 'cut') cutSelection();
     else if (act === 'delete') deleteSelection();
-  };
+  });
   const handle = document.createElement('div');
   handle.className = 'sel-handle';
   box.append(c, bar, handle);
@@ -1141,10 +1157,10 @@ function showPasteBubble(v, x, y) {
   b.textContent = '붙여넣기';
   b.style.left = `${x * S.zoom}px`;
   b.style.top = `${y * S.zoom}px`;
-  b.onclick = () => {
+  onTap(b, () => {
     removePasteBubble();
     pasteAt(v, x, y);
-  };
+  });
   v.el.append(b);
   pasteBubble = b;
 }
